@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus AutoGen | AI Car Designer</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Import Map for React & Lucide Icons -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.344.0"
+      }
+    }
+    </script>
+
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap');
+        
+        body { font-family: 'Inter', sans-serif; background-color: #121212; color: white; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Animations */
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeInUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+        
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { 
+            Sparkles, Search, Zap, Target, DollarSign, Tag, Camera, Loader, 
+            X, Settings, TrendingUp, AlertTriangle, History, Trash2, 
+            Cpu, Layers, Image as ImageIcon
+        } from 'lucide-react';
+
+        // --- API KEY CONFIGURATION ---
+        // ⚠️ IMPORTANT: For a public GitHub page, users should ideally enter their own key 
+        // or you must accept the risk of exposing yours.
+        const apiKey = "AIzaSyBTWzhCKxoUvpYiTNJx1ZGb3jXNYDO_Jb0"; 
+
+        // --- DEFAULT DATA ---
+        const DEFAULT_CAR = {
+            brand: "Nexus", model: "Prototype", year: 2025, price: 45000,
+            body: { type: "Sedan", visualPrompt: "Standard sedan" },
+            engine: { type: "Electric", fuel: "Electric" },
+            transmission: "Single-Speed",
+            stats: { hp: 300, topSpeed: 155, speed0to60: 4.5, weight: 1800 },
+            color: { name: "Clay Grey", hex: "#555555" },
+            style: { style: "Minimalist", description: "Clean lines" },
+            market: { target: "General", vibe: "Future mobility" },
+            features: ["Standard Features"],
+            logo: "Geometric Shape"
+        };
+
+        // --- HELPER FUNCTIONS ---
+        const formatCurrency = (amount) => {
+            if (amount === undefined || amount === null || isNaN(amount)) return "$0";
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount);
+        };
+
+        const cleanJson = (text) => {
+            if (!text) return "";
+            try {
+                const firstBrace = text.indexOf('{');
+                const lastBrace = text.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace !== -1) {
+                    return text.substring(firstBrace, lastBrace + 1);
+                }
+            } catch (e) { return ""; }
+            return text.replace(/```json/g, "").replace(/```/g, "").trim();
+        };
+
+        // --- SUB-COMPONENTS ---
+        const StatBar = ({ label, value, max, color = "bg-blue-500", icon: Icon }) => (
+            <div className="mb-3 group">
+                <div className="flex justify-between text-xs uppercase tracking-wider text-gray-400 mb-1">
+                    <span className="flex items-center gap-2">{Icon && <Icon size={14} className="text-gray-500" />}{label}</span>
+                    <span className="text-gray-200 font-mono">{value}</span>
+                </div>
+                <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden relative">
+                    <div className={`h-full ${color} transition-all duration-1000 relative`} style={{ width: `${Math.min(100, (parseFloat(value) / max) * 100)}%` }}></div>
+                </div>
+            </div>
+        );
+
+        const FeatureTag = ({ text }) => (
+            <span className="inline-block px-3 py-1 bg-gray-800 border border-gray-700 rounded-full text-xs text-gray-400 mr-2 mb-2">{text}</span>
+        );
+
+        const ImageCard = ({ src, label, onClick }) => {
+            if (!src) return (
+                <div className="aspect-video bg-gray-900 border border-gray-800 rounded-xl flex flex-col items-center justify-center gap-2 animate-pulse">
+                    <Loader size={20} className="text-gray-600 animate-spin" />
+                    <span className="text-xs text-gray-500 font-mono">GENERATING {label}...</span>
+                </div>
+            );
+            return (
+                <div className="aspect-video bg-black rounded-xl overflow-hidden border border-gray-800 relative group cursor-zoom-in" onClick={onClick}>
+                    <img src={src} alt={label} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                    <div className="absolute top-2 left-2 bg-black/50 backdrop-blur-md px-2 py-1 rounded text-[10px] font-bold text-white pointer-events-none border border-white/10">{label}</div>
+                </div>
+            );
+        };
+
+        // --- MAIN APP COMPONENT ---
+        function CarGenerator() {
+            const [currentCar, setCurrentCar] = useState(null);
+            const [history, setHistory] = useState([]);
+            const [isBuilding, setIsBuilding] = useState(false);
+            const [buildStep, setBuildStep] = useState("");
+            const [brandInput, setBrandInput] = useState("");
+            const [modelInput, setModelInput] = useState("");
+            const [descInput, setDescInput] = useState("");
+            const [errorMsg, setErrorMsg] = useState(null);
+            const [selectedImage, setSelectedImage] = useState(null);
+            const [images, setImages] = useState({ front: null, rear: null, interior: null, side: null });
+            const [unitSystem, setUnitSystem] = useState('metric'); 
+
+            const displayPower = (hp) => unitSystem === 'metric' ? Math.round(hp * 1.01387) : hp;
+            const displaySpeed = (mph) => unitSystem === 'metric' ? Math.round(mph * 1.60934) : mph;
+            const displayAccel = (sec) => unitSystem === 'metric' ? (parseFloat(sec) + 0.2).toFixed(1) : sec;
+
+            const sanitizeCarData = (rawData) => {
+                const data = rawData || {};
+                const safeStr = (str, def) => (typeof str === 'string' && str.length > 0 ? str : def);
+                const safeNum = (val, def) => (val && !isNaN(Number(val))) ? Number(val) : def;
+                const safeArr = (val) => (Array.isArray(val) ? val : []);
+
+                let safeTransmission = safeStr(data.transmission, "");
+                const fuel = safeStr(data.engine?.fuel, "").toLowerCase();
+                if (!safeTransmission) {
+                    if (fuel.includes("electric")) safeTransmission = "Single-Speed";
+                    else safeTransmission = "8-Speed Automatic";
+                }
+
+                return {
+                    id: Date.now(),
+                    brand: safeStr(data.brand, "Unknown"),
+                    model: safeStr(data.model, "Concept"),
+                    name: `${safeStr(data.brand, "Unknown")} ${safeStr(data.model, "Concept")}`,
+                    year: safeNum(data.year, 2025),
+                    price: safeNum(data.price, 50000),
+                    body: {
+                        type: safeStr(data.body?.type, "Sedan"),
+                        visualPrompt: safeStr(data.body?.visualPrompt, "Sedan concept")
+                    },
+                    engine: {
+                        type: safeStr(data.engine?.type, "Standard"),
+                        fuel: safeStr(data.engine?.fuel, "Electric")
+                    },
+                    transmission: safeTransmission,
+                    stats: {
+                        hp: safeNum(data.stats?.hp, 300),
+                        topSpeed: safeNum(data.stats?.topSpeed, 150),
+                        speed0to60: safeNum(data.stats?.speed0to60, 5.0),
+                        weight: safeNum(data.stats?.weight, 1800),
+                    },
+                    color: {
+                        name: safeStr(data.color?.name, "Grey"),
+                        hex: safeStr(data.color?.hex, "#555")
+                    },
+                    style: {
+                        style: safeStr(data.style?.style, "Modern"),
+                        description: safeStr(data.style?.description, "Standard Design")
+                    },
+                    market: {
+                        target: safeStr(data.market?.target, "General Public"),
+                        vibe: safeStr(data.market?.vibe, "Innovative")
+                    },
+                    features: safeArr(data.features).map(String).slice(0, 6), 
+                    logo: safeStr(data.logo, "Badge")
+                };
+            };
+
+            const generateSingleImage = async (prompt) => {
+                if (!apiKey) return null;
+                try {
+                    const response = await fetch(
+                        `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                instances: { prompt: prompt },
+                                parameters: { sampleCount: 1 },
+                            }),
+                        }
+                    );
+                    const data = await response.json();
+                    if (data.predictions && data.predictions[0]) {
+                        return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+                    }
+                } catch (error) { console.error("Image Error", error); }
+                return null;
+            };
+
+            const handleBuildCar = async (e) => {
+                if(e) e.preventDefault();
+                if(!apiKey) { setErrorMsg("API Key is missing in code."); return; }
+
+                setIsBuilding(true);
+                setBuildStep("Initializing Product Matrix...");
+                setErrorMsg(null);
+                setImages({ front: null, rear: null, interior: null, side: null });
+                
+                try {
+                    const brandInst = brandInput ? `Brand: "${brandInput}". (Adopt strict real-world design language of this brand).` : "Brand: Invent a new unique brand.";
+                    const modelInst = modelInput ? `Model: "${modelInput}".` : "Model: Invent a creative name.";
+                    const descInst = descInput ? `Description/Vibe: ${descInput}` : "Vibe: Unique random concept.";
+
+                    const specPrompt = `
+                        You are an expert automotive product planner. 
+                        Generate a realistic, detailed JSON concept.
+                        ${brandInst} ${modelInst} ${descInst}
+                        
+                        Strict JSON Output Format:
+                        {
+                          "brand": "String", "model": "String", "year": 2025, "price": 45000,
+                          "body": { "type": "String", "visualPrompt": "Visual description" },
+                          "engine": { "type": "String", "fuel": "Electric/Petrol/Hybrid" },
+                          "transmission": "String",
+                          "stats": { "hp": 300, "topSpeed": 150, "speed0to60": 5.0, "weight": 1800 },
+                          "color": { "name": "String", "hex": "#HexCode" },
+                          "style": { "style": "String", "description": "String" },
+                          "market": { "target": "String", "vibe": "String" },
+                          "features": ["Str1", "Str2", "Str3"],
+                          "logo": "Logo description"
+                        }
+                    `;
+
+                    setBuildStep("Calculating Aerodynamics & Specs...");
+                    const textResponse = await fetch(
+                        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ contents: [{ parts: [{ text: specPrompt }] }] }),
+                        }
+                    );
+
+                    const textData = await textResponse.json();
+                    const rawCar = JSON.parse(cleanJson(textData.candidates?.[0]?.content?.parts?.[0]?.text));
+                    const newCar = sanitizeCarData(rawCar);
+                    
+                    setCurrentCar(newCar); 
+                    setBuildStep("Rendering High-Fidelity Visuals...");
+
+                    const isEV = newCar.engine.fuel.toLowerCase().includes("electric");
+                    const logoVisual = newCar.logo.replace(/logo/gi, "emblem");
+                    const frontGrille = isEV ? "smooth body-colored nose, no grille" : "radiator cooling grille";
+                    const rearExhaust = isEV ? "clean diffuser, no tailpipes" : "dual exhaust pipes";
+                    const interiorTrans = newCar.transmission.toLowerCase().includes("manual") ? "manual gear stick" : "paddle shifters";
+                    const basePrompt = `photorealistic ${newCar.brand} ${newCar.model} car, ${newCar.color.name} paint, ${newCar.body.visualPrompt}, ${newCar.style.style} style, studio lighting, 8k`;
+
+                    const [frontImg, sideImg, rearImg, interiorImg] = await Promise.all([
+                        generateSingleImage(`${basePrompt}, direct straight-on front view, symmetrical, ${frontGrille}, ${logoVisual} on hood`),
+                        generateSingleImage(`${basePrompt}, side profile view, silhouette, wheels`),
+                        generateSingleImage(`${basePrompt}, direct straight-on rear view, symmetrical, taillights, ${logoVisual} on trunk, ${rearExhaust}`),
+                        generateSingleImage(`interior view, ${newCar.style.style}, leather seats, steering wheel emblem, ${interiorTrans}`)
+                    ]);
+
+                    setImages({ front: frontImg, rear: rearImg, interior: interiorImg, side: sideImg });
+                    setHistory(prev => [newCar, ...prev].slice(0, 10));
+
+                } catch (error) {
+                    console.error(error);
+                    setErrorMsg("Generation failed. Check API key or try again.");
+                } finally {
+                    setIsBuilding(false);
+                    setBuildStep("");
+                }
+            };
+
+            const loadCar = (car) => {
+                setCurrentCar(sanitizeCarData(car));
+                setImages({ front: null, rear: null, interior: null, side: null });
+            };
+
+            return (
+                <div className="min-h-screen">
+                    {/* LIGHTBOX */}
+                    {selectedImage && (
+                        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4" onClick={() => setSelectedImage(null)}>
+                            <img src={selectedImage} className="max-w-full max-h-full rounded-xl shadow-2xl" alt="Full" />
+                            <button className="absolute top-4 right-4 p-2 bg-white/10 rounded-full text-white hover:bg-white/20"><X /></button>
+                        </div>
+                    )}
+
+                    {/* HEADER */}
+                    <header className="border-b border-gray-800 bg-[#121212]/90 sticky top-0 z-50 backdrop-blur-md">
+                        <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white"><Sparkles size={18} /></div>
+                                <h1 className="text-xl font-bold text-white">AUTO<span className="text-blue-500">GEN</span></h1>
+                            </div>
+                            <button onClick={() => setUnitSystem(prev => prev === 'metric' ? 'imperial' : 'metric')} className="text-xs font-bold px-3 py-1 rounded border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors">
+                                {unitSystem === 'metric' ? 'METRIC' : 'IMPERIAL'}
+                            </button>
+                        </div>
+                    </header>
+
+                    <main className="max-w-6xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+                        <div className="lg:col-span-8 space-y-6">
+                            {/* SEARCH BAR */}
+                            <div className="bg-gray-900/50 p-4 rounded-2xl border border-gray-800 shadow-lg backdrop-blur-sm">
+                                <form onSubmit={handleBuildCar} className="flex flex-col gap-3">
+                                    <div className="flex gap-3">
+                                        <input className="w-1/3 bg-black/40 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:border-blue-500 outline-none" placeholder="Brand (Optional)" value={brandInput} onChange={e => setBrandInput(e.target.value)} disabled={isBuilding} />
+                                        <input className="w-1/3 bg-black/40 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:border-blue-500 outline-none" placeholder="Model (Optional)" value={modelInput} onChange={e => setModelInput(e.target.value)} disabled={isBuilding} />
+                                        <button type="submit" disabled={isBuilding} className="w-1/3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold text-sm transition-colors disabled:opacity-50">{isBuilding ? 'Building...' : 'Engineer'}</button>
+                                    </div>
+                                    <input className="w-full bg-black/40 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm focus:border-blue-500 outline-none" placeholder="Describe your concept..." value={descInput} onChange={e => setDescInput(e.target.value)} disabled={isBuilding} />
+                                </form>
+                            </div>
+
+                            {/* ERROR MESSAGE */}
+                            {errorMsg && (
+                                <div className="p-4 bg-red-900/20 border border-red-800 rounded-xl text-red-200 flex items-center gap-3 animate-fade-in">
+                                    <AlertTriangle size={20} /> {errorMsg}
+                                </div>
+                            )}
+
+                            {/* MAIN VIEW */}
+                            {isBuilding ? (
+                                <div className="min-h-[400px] flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+                                    <Loader size={48} className="text-blue-500 animate-spin mb-4" />
+                                    <h2 className="text-xl font-bold text-white">{buildStep}</h2>
+                                </div>
+                            ) : currentCar ? (
+                                <div className="space-y-6 animate-fade-in">
+                                    {/* Title Row */}
+                                    <div className="flex flex-col md:flex-row justify-between border-b border-gray-800 pb-4">
+                                        <div>
+                                            <div className="flex items-center gap-2 text-blue-500 font-bold text-xs mb-1"><Tag size={12}/> {currentCar.year} CONCEPT</div>
+                                            <h2 className="text-4xl font-bold text-white">{currentCar.brand} {currentCar.model}</h2>
+                                            <p className="text-gray-400">{currentCar.body.type} • {currentCar.style.style}</p>
+                                        </div>
+                                        <div className="text-left md:text-right mt-4 md:mt-0">
+                                            <div className="text-xs text-gray-500 font-bold">ESTIMATED MSRP</div>
+                                            <div className="text-3xl text-green-400 font-mono">{formatCurrency(currentCar.price)}</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Images */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <ImageCard src={images.front} label="FRONT PROFILE" onClick={() => setSelectedImage(images.front)} />
+                                        <ImageCard src={images.side} label="SIDE PROFILE" onClick={() => setSelectedImage(images.side)} />
+                                        <ImageCard src={images.rear} label="REAR PROFILE" onClick={() => setSelectedImage(images.rear)} />
+                                        <ImageCard src={images.interior} label="INTERIOR" onClick={() => setSelectedImage(images.interior)} />
+                                    </div>
+
+                                    {/* Specs */}
+                                    <div className="bg-gray-900/50 p-6 rounded-xl border border-gray-800 grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div className="space-y-2">
+                                            <h3 className="text-sm font-bold text-gray-500 mb-3 flex items-center gap-2"><TrendingUp size={14}/> SPECS</h3>
+                                            <StatBar label="Power (HP)" value={Math.round(currentCar.stats.hp)} max={1500} icon={Zap} />
+                                            <StatBar label="Top Speed" value={`${currentCar.stats.topSpeed} MPH`} max={400} icon={Wind} />
+                                            <StatBar label="0-60 MPH" value={`${currentCar.stats.speed0to60} s`} max={10} icon={Gauge} />
+                                            <StatBar label="Weight" value={`${currentCar.stats.weight} kg`} max={4000} icon={Disc} />
+                                        </div>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-500 mb-2 flex items-center gap-2"><Settings size={14}/> DETAILS</h3>
+                                                <div className="text-sm text-gray-300">
+                                                    <p><strong>Engine:</strong> {currentCar.engine.type}</p>
+                                                    <p><strong>Trans:</strong> {currentCar.transmission}</p>
+                                                    <p><strong>Color:</strong> {currentCar.color.name}</p>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h3 className="text-sm font-bold text-gray-500 mb-2 flex items-center gap-2"><Layers size={14}/> FEATURES</h3>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {currentCar.features.map((f,i) => <FeatureTag key={i} text={f} />)}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="min-h-[400px] flex flex-col items-center justify-center text-center p-8 opacity-60">
+                                    <Sparkles size={64} className="text-gray-600 mb-4" />
+                                    <h2 className="text-2xl font-bold text-white">Ready to Engineer</h2>
+                                    <p className="text-gray-400 mt-2">Enter details above to generate a vehicle.</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Sidebar */}
+                        <div className="lg:col-span-4">
+                            <div className="bg-[#1a1a1a] rounded-xl border border-gray-800 h-full min-h-[500px] p-4 flex flex-col">
+                                <div className="flex justify-between items-center border-b border-gray-800 pb-4 mb-4">
+                                    <h3 className="font-bold text-gray-300 flex items-center gap-2"><History size={16}/> RECENT</h3>
+                                    {history.length > 0 && <button onClick={() => setHistory([])} className="text-xs text-red-400 flex items-center gap-1"><Trash2 size={12}/> Clear</button>}
+                                </div>
+                                <div className="space-y-3 overflow-y-auto flex-1">
+                                    {history.map(car => (
+                                        <div key={car.id} onClick={() => loadCar(car)} className="p-3 bg-gray-900/50 border border-gray-800 rounded-lg cursor-pointer hover:border-blue-500/50 transition-all">
+                                            <div className="flex justify-between mb-1">
+                                                <span className="font-bold text-white text-sm">{car.brand} {car.model}</span>
+                                                <span className="text-xs text-green-400 font-mono">{formatCurrency(car.price)}</span>
+                                            </div>
+                                            <div className="text-xs text-gray-500">{car.year} {car.body.type}</div>
+                                        </div>
+                                    ))}
+                                    {history.length === 0 && <div className="text-center text-gray-600 py-10 text-xs">No history found.</div>}
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<CarGenerator />);
+    </script>
+</body>
+</html>
+
